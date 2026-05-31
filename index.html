@@ -327,6 +327,10 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
       <div class="panel">
         <div class="head"><span class="ic">⌬</span> CADEIA AO-40 FEC <span class="tag">Phil Karn KA9Q</span></div>
         <div class="body">
+          <div class="row" style="margin-bottom:9px">
+            <button class="btn" id="btnDecodeOgg">▶ Decodificar do meu .ogg</button>
+            <span class="muted" id="decRes">—</span>
+          </div>
           <div class="kv" id="chain" style="grid-template-columns:auto 1fr">
             <div class="k">1 · DBPSK demod (1200 bd)</div><div class="v" id="ch1">—</div>
             <div class="k">2 · Busca de syncword (65 bit)</div><div class="v" id="ch2">—</div>
@@ -1122,6 +1126,7 @@ function runFEC(){
   $('#ch2').innerHTML=ok?`<span class="c-grn">sync @${s.pos} \u00b7 ${s.dist}/65${s.inv?' inv':''}</span>`:`<span class="c-amb">n\u00e3o (melhor ${s.dist}/65)</span>`;
   log(`  Syncword distribu\u00eddo (passo 80): melhor ${s.dist}/65 @${s.pos}${s.inv?' inv':''}`,ok?'c-grn':'c-amb');
   if(!ok){['#ch3','#ch4','#ch5','#ch6','#ch7'].forEach(i=>$(i).innerHTML='<span class="c-dim">sem lock</span>');
+    $('#decRes').innerHTML=`<span class="c-amb">✗ sem syncword no .ogg (melhor ${s.dist}/65)</span>`;
     log('  Sem syncword s\u00f3lido \u2014 frame n\u00e3o captur\u00e1vel neste trecho. Use o caminho hex (verificado).','c-amb');return;}
   $('#ch3').innerHTML='<span class="c-grn">80\u00d765 OK</span>';$('#ch4').innerHTML='<span class="c-grn">Viterbi OK</span>';$('#ch5').innerHTML='<span class="c-grn">descramble OK</span>';
   const hits=allSyncs(bits,14);log(`  ${hits.length} candidato(s) de frame.`,'c-dim');
@@ -1133,10 +1138,12 @@ function runFEC(){
   }
   if(firstValid){
     $('#ch6').innerHTML=`<span class="c-grn">RS OK \u00b7 ${rsErrs}B corrig.</span>`;$('#ch7').innerHTML=`<span class="c-grn">${nValid} frame(s) \u2713</span>`;
+    $('#decRes').innerHTML=`<span class="c-grn">✓ ${nValid} frame(s) decodificados do seu .ogg</span>`;
     renderTlm(firstValid.o,'FEC ao vivo \u2713');
     log(`  \u2605 LOCK! ${nValid} frame(s) decodificados do \u00e1udio \u00b7 RS corrigiu ${rsErrs} bytes.`,'c-grn');
   } else {
     $('#ch6').innerHTML='<span class="c-amb">RS n\u00e3o convergiu</span>';$('#ch7').innerHTML='<span class="c-amb">sem frame v\u00e1lido</span>';
+    $('#decRes').innerHTML='<span class="c-amb">✗ sync achado, mas RS não validou — veja o console</span>';
     log('  Cadeia OK mas RS n\u00e3o validou (SNR do trecho ou conven\u00e7\u00e3o de interleaver \u2260 sat\u00e9lite). Caminho hex \u00e9 o verificado.','c-amb');
   }
   renderSeries();renderFrameLog();
@@ -1254,6 +1261,20 @@ $('#btnExpDop')&&($('#btnExpDop').onclick=expDopplerCSV);
 $('#btnExpFr')&&($('#btnExpFr').onclick=expFramesJSON);
 $('#btnExpSes')&&($('#btnExpSes').onclick=expSessionJSON);
 $('#btnExpWf')&&($('#btnExpWf').onclick=expWaterfallPNG);
+$('#btnDecodeOgg')&&($('#btnDecodeOgg').onclick=()=>{
+  if(!STATE.pcm){log('\u26a0 Nenhum .ogg carregado. Solte sua captura no painel "Ingestão de captura" e tente de novo.','c-amb');$('#decRes').innerHTML='<span class="c-amb">sem .ogg carregado</span>';$('#cstat').textContent='sem .ogg';return;}
+  $('#cstat').innerHTML='<span class="spinner"></span> decodificando seu .ogg';
+  $('#decRes').innerHTML='<span class="spinner"></span> tentando…';
+  log('\u2501\u2501\u2501 TENTATIVA DE DECODE DIRETO DO SEU .OGG \u2501\u2501\u2501','c-vio');
+  setTimeout(()=>{
+    try{
+      if(!STATE.track){const wf=computeWaterfall();drawWaterfall(wf);metricsFromWaterfall(wf);}
+      if(!STATE.baud)STATE.baud=estimateBaud();
+      runFEC();
+    }catch(e){log('Erro no decode: '+e.message,'c-red');$('#decRes').innerHTML='<span class="c-red">erro — veja o console</span>';}
+    $('#cstat').textContent='concluído';
+  },40);
+});
 $('#btnTestFrame').onclick=()=>{$('#hexBox').value=TEST_FRAME;const o=parseFC1(hexToBytes(TEST_FRAME));renderTlm(o,'frame de teste');if(o.ok){o._t=0;addFrame(o,'teste');renderFrameLog();renderSeries();}};
 $('#btnParseHex').onclick=()=>{const b=hexToBytes($('#hexBox').value);if(b.length<56){log('Hex curto: '+b.length+' bytes.','c-amb');return;}const o=parseFC1(b);renderTlm(o,'hex ('+b.length+' B)');if(o.ok){o._t=0;addFrame(o,'hex');renderFrameLog();renderSeries();}};
 
