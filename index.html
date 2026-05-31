@@ -186,6 +186,25 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
       </div>
 
       <div class="panel">
+        <div class="head"><span class="ic">✎</span> TLE / ESTAÇÃO <span class="tag">só p/ órbita</span></div>
+        <div class="body">
+          <div class="row">
+            <button class="btn" id="btnFetchTle">⬇ Buscar TLE atual (Celestrak)</button>
+          </div>
+          <label class="lbl">TLE (2 linhas) — cole o da observação (SatNOGS) p/ outras datas</label>
+          <textarea class="fld" id="tleBox" rows="2"></textarea>
+          <button class="btn alt" id="btnApplyTle" style="margin-top:6px">Aplicar TLE</button>
+          <hr class="sep">
+          <div class="row">
+            <div style="flex:1"><label class="lbl">Estação lat°</label><input class="fld" id="obsLat" value="-26.9078"></div>
+            <div style="flex:1"><label class="lbl">Estação lon°</label><input class="fld" id="obsLon" value="-48.6619"></div>
+          </div>
+          <button class="btn" id="btnApplyObs" style="margin-top:6px">Aplicar estação</button>
+          <div class="muted" style="margin-top:6px">O decode da telemetria não usa o TLE — isto só ajusta mapa, geometria do pass e o Doppler previsto.</div>
+        </div>
+      </div>
+
+      <div class="panel">
         <div class="head"><span class="ic">▤</span> METADADOS</div>
         <div class="body">
           <div class="kv" id="meta">
@@ -401,24 +420,6 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
             <div class="k">Duração</div><div class="v" id="pgDur">—</div>
           </div>
           <div class="muted" id="pgIn" style="margin-top:6px">—</div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="head"><span class="ic">✎</span> TLE / ESTAÇÃO</div>
-        <div class="body">
-          <div class="row">
-            <button class="btn" id="btnFetchTle">⬇ Buscar TLE atual (Celestrak)</button>
-          </div>
-          <label class="lbl">TLE (2 linhas) — cole o atual aqui</label>
-          <textarea class="fld" id="tleBox" rows="2"></textarea>
-          <button class="btn alt" id="btnApplyTle" style="margin-top:6px">Aplicar TLE</button>
-          <hr class="sep">
-          <div class="row">
-            <div style="flex:1"><label class="lbl">Estação lat°</label><input class="fld" id="obsLat" value="-26.9078"></div>
-            <div style="flex:1"><label class="lbl">Estação lon°</label><input class="fld" id="obsLon" value="-48.6619"></div>
-          </div>
-          <button class="btn" id="btnApplyObs" style="margin-top:6px">Aplicar estação</button>
         </div>
       </div>
     </div>
