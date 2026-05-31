@@ -53,6 +53,10 @@ header::after{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;backg
 .dot.warn{background:var(--amber);box-shadow:0 0 8px var(--amber)}
 .dot.err{background:var(--red);box-shadow:0 0 8px var(--red)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.headsig{flex-basis:100%;border-top:1px solid var(--line);margin-top:9px;padding-top:8px;font-size:11px;color:var(--dim);letter-spacing:.3px}
+.headsig a{color:var(--cyan);text-decoration:none;border-bottom:1px dotted var(--line2)}
+.headsig a:hover{color:var(--grn);border-bottom-color:var(--grn)}
+.foot a{color:var(--cyan);text-decoration:none}.foot a:hover{color:var(--grn)}
 
 /* GRID */
 .grid{display:grid;grid-template-columns:340px 1fr 360px;gap:14px;align-items:start}
@@ -155,6 +159,11 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
       <span class="pill"><span class="dot" id="ledTrk"></span> TRACKER</span>
       <span class="pill" id="utcPill">UTC --:--:--</span>
     </div>
+    <div class="headsig">
+      <a href="https://rmayormartins.github.io" target="_blank" rel="noopener">Ramon Mayor Martins, Ph.D.</a>
+      &nbsp;·&nbsp; <a href="https://pt.wikipedia.org/wiki/Instituto_Federal_de_Santa_Catarina" target="_blank" rel="noopener">IFSC</a>
+      — Área de <a href="https://pt.wikipedia.org/wiki/Telecomunica%C3%A7%C3%B5es" target="_blank" rel="noopener">Telecomunicações</a>
+    </div>
   </header>
 
   <div class="grid">
@@ -168,11 +177,6 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
             <div class="big">◢ Solte o .ogg (áudio)</div>
             <small>ou clique · 48 kHz mono SatNOGS</small>
             <input type="file" id="fileOgg" accept=".ogg,.wav,audio/*" hidden>
-          </div>
-          <div class="drop" id="dropPng" style="margin-top:9px">
-            <div class="big">◢ Solte o waterfall .png</div>
-            <small>imagem opcional do SatNOGS</small>
-            <input type="file" id="filePng" accept="image/*" hidden>
           </div>
           <div class="row" style="margin-top:10px">
             <button class="btn" id="btnDemo">▶ Analisar exemplo</button>
@@ -238,7 +242,6 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
       <div class="panel">
         <div class="tabs">
           <div class="tab active" data-v="wf">Waterfall</div>
-          <div class="tab" data-v="img">Imagem SatNOGS</div>
           <div class="tab" data-v="iq">Constelação BPSK</div>
           <div class="tab" data-v="sp">Espectro médio</div>
           <div class="tab" data-v="dop">Doppler · SGP4</div>
@@ -251,10 +254,6 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
               <span class="axlbl">◀ Frequência de áudio (kHz) ▶ · vertical = tempo (topo = fim do pass)</span>
               <label class="row" style="gap:5px"><input type="checkbox" id="ckDop" checked> <span class="axlbl">curva Doppler</span></label>
             </div>
-          </div>
-          <div class="view" id="vimg">
-            <div class="cwrap"><canvas id="img" width="700" height="520"></canvas></div>
-            <div class="axlbl" style="margin-top:6px">Waterfall original gerado pelo SatNOGS (referência visual).</div>
           </div>
           <div class="view" id="viq">
             <div class="row" style="gap:14px;align-items:flex-start">
@@ -288,6 +287,20 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
       </div>
 
       <div class="panel">
+        <div class="head"><span class="ic">▦</span> TELEMETRIA FC-1 DECODIFICADA <span class="tag" id="tlmSrc">—</span></div>
+        <div class="body">
+          <div class="row" style="margin-bottom:8px">
+            <button class="btn" id="btnTestFrame">▶ Frame de teste real</button>
+            <button class="btn alt" id="btnClearTlm">limpar</button>
+          </div>
+          <label class="lbl">Frame em hex (256 bytes · espaços/quebras ok)</label>
+          <textarea class="fld" id="hexBox" rows="3" placeholder="89 00 00 00 ... (cole aqui um frame do Dashboard oficial ou do Warehouse)"></textarea>
+          <button class="btn alt" id="btnParseHex" style="margin-top:6px">Decodificar frame</button>
+          <div id="tlmOut" style="margin-top:10px"><div class="muted">Sem frame decodificado. Use o botão de teste ou cole um hex.</div></div>
+        </div>
+      </div>
+
+      <div class="panel">
         <div class="head"><span class="ic">▮</span> CONSOLE DE DECODIFICAÇÃO <span class="tag" id="cstat">idle</span></div>
         <div class="body tight"><div id="console"></div></div>
       </div>
@@ -305,20 +318,6 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
             <div class="k">7 · Parser frame 256 B</div><div class="v" id="ch7">—</div>
           </div>
           <div class="note">Constantes reais do gr-satellites (D. Estévez). Os passos 1–2 rodam <b>ao vivo</b> no seu .ogg (a busca de syncword indica se há frame capturável). Os passos 3–6 estão implementados e marcados <b>experimental</b>: o lock ao vivo depende de SNR e das convenções exatas do interleaver/RS. <b>Caminho verificado:</b> cole um frame hex (Dashboard oficial → "copy frame", ou o Warehouse) no painel abaixo — o parser de canais é bit-exato.</div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="head"><span class="ic">▦</span> TELEMETRIA FC-1 DECODIFICADA <span class="tag" id="tlmSrc">—</span></div>
-        <div class="body">
-          <div class="row" style="margin-bottom:8px">
-            <button class="btn" id="btnTestFrame">▶ Frame de teste real</button>
-            <button class="btn alt" id="btnClearTlm">limpar</button>
-          </div>
-          <label class="lbl">Frame em hex (256 bytes · espaços/quebras ok)</label>
-          <textarea class="fld" id="hexBox" rows="3" placeholder="89 00 00 00 ... (cole aqui um frame do Dashboard oficial ou do Warehouse)"></textarea>
-          <button class="btn alt" id="btnParseHex" style="margin-top:6px">Decodificar frame</button>
-          <div id="tlmOut" style="margin-top:10px"><div class="muted">Sem frame decodificado. Use o botão de teste ou cole um hex.</div></div>
         </div>
       </div>
 
@@ -425,7 +424,12 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
     </div>
 
   </div>
-  <div class="foot">FUNcube-1 Commander · análise de sinal + tracking · construído no estilo mission-control · dados de telemetria não substituem o FUNcube Dashboard oficial</div>
+  <div class="foot">
+    <a href="https://rmayormartins.github.io" target="_blank" rel="noopener">Ramon Mayor Martins, Ph.D.</a>
+    &nbsp;·&nbsp; <a href="https://pt.wikipedia.org/wiki/Instituto_Federal_de_Santa_Catarina" target="_blank" rel="noopener">IFSC</a>
+    — Área de <a href="https://pt.wikipedia.org/wiki/Telecomunica%C3%A7%C3%B5es" target="_blank" rel="noopener">Telecomunicações</a><br>
+    FUNcube-1 Commander · análise de sinal + tracking + decode AO-40 FEC · dados de telemetria não substituem o FUNcube Dashboard oficial
+  </div>
 </div>
 
 <script>
@@ -757,15 +761,6 @@ function drawSpectrum(){
   ctx.stroke();
 }
 
-/* ===================== PNG WATERFALL ===================== */
-function loadPng(file){const url=URL.createObjectURL(file),im=new Image();
-  im.onload=()=>{const cv=$('#img'),ctx=cv.getContext('2d');cv.width=im.width;cv.height=im.height;
-    cv.style.maxHeight='560px';cv.style.objectFit='contain';ctx.drawImage(im,0,0);URL.revokeObjectURL(url);
-    log('Waterfall PNG carregado ('+im.width+'×'+im.height+').','c-grn');
-    $$('.tab').forEach(t=>t.classList.remove('active'));$$('.view').forEach(v=>v.classList.remove('active'));
-    $('[data-v="img"]').classList.add('active');$('#vimg').classList.add('active');};
-  im.src=url;}
-
 /* ===================== TRACKER ===================== */
 let satrec=null, clockMode='capture', refTime=SAMPLE_TS.getTime(), liveTimer=null;
 let OBS={lat:-26.9078,lon:-48.6619,h:0.005};
@@ -879,7 +874,6 @@ function bindDrop(dropId,inputId,handler){
   d.ondrop=e=>{e.preventDefault();d.classList.remove('hot');if(e.dataTransfer.files[0])handler(e.dataTransfer.files[0]);};
 }
 bindDrop('#dropOgg','#fileOgg',loadAudioFile);
-bindDrop('#dropPng','#filePng',loadPng);
 $$('.tab').forEach(t=>t.onclick=()=>{$$('.tab').forEach(x=>x.classList.remove('active'));$$('.view').forEach(v=>v.classList.remove('active'));
   t.classList.add('active');$('#v'+t.dataset.v).classList.add('active');});
 $('#ckDop').onchange=()=>{if(STATE.pcm)drawWaterfall(computeWaterfall());};
@@ -902,7 +896,7 @@ $('#btnFetchTle').onclick=async()=>{
 $('#btnDemo').onclick=()=>{
   if(STATE.pcm){runPipeline();return;}
   log('Sem áudio carregado — arraste o .ogg do SatNOGS para iniciar a análise.','c-amb');
-  log('Dica: também aceito o waterfall .png como referência visual.','c-dim');
+  log('Dica: o pipeline roda sozinho ao soltar o .ogg (waterfall, modos, Doppler, FEC e telemetria).','c-dim');
 };
 
 /* ===================== PARSER DE TELEMETRIA FC-1 (bit-exato, validado vs frame real) ===================== */
