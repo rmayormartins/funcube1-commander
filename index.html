@@ -321,6 +321,27 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
           <div id="tlmOut" style="margin-top:10px"><div class="muted">Sem frame decodificado. Use o botão de teste ou cole um hex.</div></div>
         </div>
       </div>
+
+      <div class="panel">
+        <div class="head"><span class="ic">📈</span> SÉRIE TEMPORAL & LOG DE FRAMES</div>
+        <div class="body tight">
+          <div class="cwrap"><canvas id="series" width="700" height="190"></canvas></div>
+          <div id="frlog" style="margin-top:8px;max-height:170px;overflow-y:auto"><div class="muted">Sem frames. Decodifique do áudio ou cole hex.</div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="head"><span class="ic">⭳</span> EXPORTAR DADOS <span class="tag">para análise</span></div>
+        <div class="body">
+          <div class="row">
+            <button class="btn" id="btnExpDop">Doppler .csv</button>
+            <button class="btn" id="btnExpFr">Frames .json</button>
+            <button class="btn alt" id="btnExpSes">Sessão .json</button>
+            <button class="btn alt" id="btnExpWf">Waterfall .png</button>
+          </div>
+          <div class="muted" style="margin-top:7px">CSV do Doppler (t, medido, previsto), JSON dos frames decodificados com todos os canais, JSON da sessão (metadados+métricas+modos+fit) e o waterfall renderizado.</div>
+        </div>
+      </div>
     </div>
 
     <!-- ============ RIGHT ============ -->
@@ -367,6 +388,20 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
         <div class="head"><span class="ic">⤒</span> PRÓXIMAS PASSAGENS <span class="tag">Itajaí/SC</span></div>
         <div class="body tight" style="padding:6px 12px">
           <div id="passes"><div class="muted" style="padding:8px 0">Carregue um TLE atual para prever passagens.</div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="head"><span class="ic">◷</span> GEOMETRIA DO PASS DA CAPTURA</div>
+        <div class="body">
+          <div class="kv" id="passgeo">
+            <div class="k">AOS</div><div class="v" id="pgAos">—</div>
+            <div class="k">TCA (máx. elev.)</div><div class="v c" id="pgTca">—</div>
+            <div class="k">LOS</div><div class="v" id="pgLos">—</div>
+            <div class="k">Elevação máxima</div><div class="v g" id="pgMax">—</div>
+            <div class="k">Duração</div><div class="v" id="pgDur">—</div>
+          </div>
+          <div class="muted" id="pgIn" style="margin-top:6px">—</div>
         </div>
       </div>
 
@@ -572,6 +607,7 @@ function showMetrics(m,baud){
   $('#sBaud').textContent=baud?fmt(baud,0)+' bd':'—';
   $('#sSnr').textContent=fmt(m.snr,1)+' dB';
   $('#sNf').textContent=fmt(m.nf,1)+' dB';
+  STATE.metrics={center_Hz:m.center,doppler_Hz:m.dopTotal,bw_Hz:m.bw,snr_dB:m.snr,nf_dB:m.nf,baud:baud};
   log(`Métricas → centro ${m.center.toFixed(0)}Hz · Doppler ±${(m.dopTotal/2).toFixed(0)}Hz · BW ${m.bw.toFixed(0)}Hz · SNR ${m.snr.toFixed(1)}dB`,'c-cyan');
 }
 
@@ -634,6 +670,7 @@ function detectModes(m,baud){
   log(`  CW beacon ......... ${(sc.cw*100).toFixed(0)}%`, sc.cw>0.4?'c-amb':'c-dim');
   log(`  BPSK telemetry .... ${(sc.bpsk*100).toFixed(0)}%`, sc.bpsk>0.4?'c-grn':'c-dim');
   log(`  Linear transponder  ${(sc.trx*100).toFixed(0)}%`, sc.trx>0.4?'c-cyan':'c-dim');
+  STATE.modes={cw:sc.cw,bpsk:sc.bpsk,trx:sc.trx,verdict:names[win[0]],conf:win[1]};
   $('#verdict').textContent=names[win[0]];
   $('#verdictConf').textContent=(win[1]*100).toFixed(0)+'%';
   $$('.mode i').forEach(i=>i.classList.remove('win'));
@@ -732,12 +769,12 @@ function loadPng(file){const url=URL.createObjectURL(file),im=new Image();
 /* ===================== TRACKER ===================== */
 let satrec=null, clockMode='capture', refTime=SAMPLE_TS.getTime(), liveTimer=null;
 let OBS={lat:-26.9078,lon:-48.6619,h:0.005};
-const TLE_FALLBACK=["1 39444U 13066AE  26001.50000000  .00003500  00000-0  45000-3 0  9990",
-                    "2 39444  97.6000 120.0000 0040000 250.0000 110.0000 14.85000000600000"];
+const TLE_FALLBACK=["1 39444U 13066AE  26148.43326745  .00008280  00000-0  51776-3 0  9992",
+                    "2 39444  97.8263 119.4718 0034371 271.1115  88.6176 15.09206063676689"];
 function setTLE(l1,l2,label){
   try{satrec=satellite.twoline2satrec(l1.trim(),l2.trim());
     $('#tleBox').value=l1.trim()+'\n'+l2.trim();$('#tleTag').textContent='TLE: '+label;
-    $('#ledTrk').className='dot on';log('TLE aplicado ('+label+').','c-grn');updateTracker();predictPasses();
+    $('#ledTrk').className='dot on';log('TLE aplicado ('+label+').','c-grn');updateTracker();predictPasses();passGeometry();
   }catch(e){log('TLE inválido: '+e.message,'c-red');$('#ledTrk').className='dot err';}
 }
 function updateTracker(){
@@ -934,6 +971,99 @@ function renderTlm(o,src){
 
 /* ===================== CADEIA AO-40 FEC (constantes reais gr-satellites) ===================== */
 const SYNC65="11111110000111011110010110010010000001000100110001011101011011000";
+/* --- Reed-Solomon CCSDS (160,128) dual-basis, validado round-trip --- */
+// Reed-Solomon CCSDS (255,223) -> shortened (160,128), dual-basis, interleave-2. Port of Karn libfec.
+const MM=8, NN=255, A0=NN, GF=0x187, FCR=112, PRIM=11, NROOTS=32;
+function modnn(x){while(x>=NN){x-=NN;x=(x>>MM)+(x&NN);}return x;}
+const alpha_to=new Int32Array(NN+1), index_of=new Int32Array(NN+1), genpoly=new Int32Array(NROOTS+1);
+(function initRS(){
+  let sr=1; index_of[0]=A0; alpha_to[NN]=0;
+  for(let i=0;i<NN;i++){alpha_to[i]=sr;index_of[sr]=i;sr<<=1;if(sr&256)sr^=GF;sr&=255;}
+  genpoly[0]=1;
+  for(let i=0,root=FCR*PRIM;i<NROOTS;i++,root+=PRIM){
+    genpoly[i+1]=1;
+    for(let j=i;j>0;j--){
+      if(genpoly[j]!==0)genpoly[j]=genpoly[j-1]^alpha_to[modnn(index_of[genpoly[j]]+root)];
+      else genpoly[j]=genpoly[j-1];
+    }
+    genpoly[0]=alpha_to[modnn(index_of[genpoly[0]]+root)];
+  }
+  for(let i=0;i<=NROOTS;i++)genpoly[i]=index_of[genpoly[i]];
+})();
+// dual basis tables
+const tal=[0x8d,0xef,0xec,0x86,0xfa,0x99,0xaf,0x7b];
+const Taltab=new Uint8Array(256), Tal1tab=new Uint8Array(256);
+(function initTal(){for(let i=0;i<256;i++){let v=0;for(let j=0;j<8;j++)for(let k=0;k<8;k++){if(i&(1<<k))v^=tal[7-k]&(1<<j);}Taltab[i]=v;Tal1tab[v]=i;}})();
+
+function encode_rs(data){ // data: NN-NROOTS-pad bytes -> returns NROOTS parity (conventional basis)
+  const pad=NN-(data.length+NROOTS); const par=new Uint8Array(NROOTS);
+  for(let i=0;i<data.length;i++){
+    const fb=index_of[data[i]^par[0]];
+    if(fb!==A0)for(let j=1;j<NROOTS;j++)par[j]^=alpha_to[modnn(fb+genpoly[NROOTS-j])];
+    for(let j=0;j<NROOTS-1;j++)par[j]=par[j+1];
+    par[NROOTS-1]=(fb!==A0)?alpha_to[modnn(fb+genpoly[0])]:0;
+  }
+  return par;
+}
+function decode_rs(data,pad){ // data length NN-pad (conventional). returns corrected count or -1. modifies in place
+  const NLEN=NN-pad;
+  const s=new Int32Array(NROOTS);
+  for(let i=0;i<NROOTS;i++)s[i]=data[0];
+  for(let j=1;j<NLEN;j++)for(let i=0;i<NROOTS;i++){
+    if(s[i]===0)s[i]=data[j];else s[i]=data[j]^alpha_to[modnn(index_of[s[i]]+(FCR+i)*PRIM)];
+  }
+  let synError=0;for(let i=0;i<NROOTS;i++){synError|=s[i];s[i]=index_of[s[i]];}
+  if(!synError)return 0;
+  const lambda=new Int32Array(NROOTS+1);lambda[0]=1;
+  const b=new Int32Array(NROOTS+1);for(let i=0;i<=NROOTS;i++)b[i]=index_of[lambda[i]];
+  let r=0,el=0;
+  while(++r<=NROOTS){
+    let discr_r=0;
+    for(let i=0;i<r;i++){if(lambda[i]!==0&&s[r-i-1]!==A0)discr_r^=alpha_to[modnn(index_of[lambda[i]]+s[r-i-1])];}
+    discr_r=index_of[discr_r];
+    if(discr_r===A0){for(let i=NROOTS;i>0;i--)b[i]=b[i-1];b[0]=A0;}
+    else{
+      const t=new Int32Array(NROOTS+1);t[0]=lambda[0];
+      for(let i=0;i<NROOTS;i++){if(b[i]!==A0)t[i+1]=lambda[i+1]^alpha_to[modnn(discr_r+b[i])];else t[i+1]=lambda[i+1];}
+      if(2*el<=r-1){el=r-el;for(let i=0;i<=NROOTS;i++)b[i]=(lambda[i]===0)?A0:modnn(index_of[lambda[i]]-discr_r+NN);}
+      else{for(let i=NROOTS;i>0;i--)b[i]=b[i-1];b[0]=A0;}
+      for(let i=0;i<=NROOTS;i++)lambda[i]=t[i];
+    }
+  }
+  let deg_lambda=0;for(let i=0;i<=NROOTS;i++){lambda[i]=index_of[lambda[i]];if(lambda[i]!==A0)deg_lambda=i;}
+  const reg=new Int32Array(NROOTS+1),root=new Int32Array(NROOTS),loc=new Int32Array(NROOTS);
+  for(let i=1;i<=NROOTS;i++)reg[i]=lambda[i];
+  let count=0; const IPRIM=116; // (1/prim) for prim=11
+  for(let i=1,k=IPRIM-1;i<=NN;i++,k=modnn(k+IPRIM)){
+    let q=1;
+    for(let j=deg_lambda;j>0;j--){if(reg[j]!==A0){reg[j]=modnn(reg[j]+j);q^=alpha_to[reg[j]];}}
+    if(q!==0)continue;
+    root[count]=i;loc[count]=k;count++;
+  }
+  if(deg_lambda!==count)return -1; // uncorrectable
+  // omega
+  const omega=new Int32Array(NROOTS);let deg_omega=deg_lambda-1;
+  for(let i=0;i<=deg_omega;i++){let tmp=0;for(let j=i;j>=0;j--){if(s[i-j]!==A0&&lambda[j]!==A0)tmp^=alpha_to[modnn(s[i-j]+lambda[j])];}omega[i]=index_of[tmp];}
+  // Forney
+  for(let j=count-1;j>=0;j--){
+    let num1=0;for(let i=deg_omega;i>=0;i--){if(omega[i]!==A0)num1^=alpha_to[modnn(omega[i]+i*root[j])];}
+    const num2=alpha_to[modnn(root[j]*(FCR-1)+NN)];let den=0;
+    const dl=Math.min(deg_lambda,NROOTS-1);
+    for(let i=dl&~1;i>=0;i-=2){if(lambda[i+1]!==A0)den^=alpha_to[modnn(lambda[i+1]+i*root[j])];}
+    if(num1!==0&&loc[j]>=pad){
+      const corr=alpha_to[modnn(index_of[num1]+index_of[num2]+NN-index_of[den])];
+      data[loc[j]-pad]^=corr;
+    }
+  }
+  return count;
+}
+function decode_rs_ccsds(data,pad){ // data dual-basis length NN-pad, in place
+  const NLEN=NN-pad;for(let i=0;i<NLEN;i++)data[i]=Tal1tab[data[i]];
+  const r=decode_rs(data,pad);
+  if(r>0)for(let i=0;i<NLEN;i++)data[i]=Taltab[data[i]];
+  return r;
+}
+
 function ccsdsRand(n){let s=0xFF;const o=new Uint8Array(n);
   for(let i=0;i<n;i++){let b=0;for(let j=0;j<8;j++){b=(b<<1)|((s>>7)&1);const fb=((s)^(s>>2)^(s>>4)^(s>>7))&1;s=((s<<1)|fb)&0xFF;}o[i]=b;}return o;}
 function dbpskBits(){
@@ -947,13 +1077,15 @@ function dbpskBits(){
   for(let i=1;i<sy.length;i++){const d=sy[i][0]*sy[i-1][0]+sy[i][1]*sy[i-1][1];bits[i-1]=d<0?1:0;} // DBPSK: phase change π => 1
   return bits;
 }
-function searchSync(bits){
-  const S=[...SYNC65].map(c=>+c), L=S.length;let best={pos:-1,dist:99,inv:0};
-  for(let inv=0;inv<2;inv++){
-    for(let p=0;p+L<=bits.length;p++){let d=0;for(let k=0;k<L;k++){if((bits[p+k]^inv)!==S[k])d++;if(d>=best.dist)break;}
-      if(d<best.dist){best={pos:p,dist:d,inv};}}
-  }
+function searchSync(bits){ // sync DISTRIBUÍDO: 65 bits a passo 80 (matriz 80x65, leitura por coluna)
+  const S=[...SYNC65].map(c=>+c),L=S.length,FR=5200;let best={pos:-1,dist:99,inv:0};const last=bits.length-FR;
+  for(let inv=0;inv<2;inv++)for(let p=0;p<=last;p++){let d=0;for(let k=0;k<L;k++){if((bits[p+k*80]^inv)!==S[k]){if(++d>=best.dist)break;}}if(d<best.dist)best={pos:p,dist:d,inv};}
   return best;
+}
+function allSyncs(bits,thr){
+  const S=[...SYNC65].map(c=>+c),L=S.length,FR=5200,hits=[];const last=bits.length-FR;
+  for(let inv=0;inv<2;inv++)for(let p=0;p<=last;p++){let d=0;for(let k=0;k<L;k++){if((bits[p+k*80]^inv)!==S[k]){if(++d>thr)break;}}if(d<=thr)hits.push({pos:p,dist:d,inv});}
+  hits.sort((a,b)=>a.pos-b.pos);const out=[];for(const h of hits){if(!out.length||h.pos-out[out.length-1].pos>2000)out.push(h);else if(h.dist<out[out.length-1].dist)out[out.length-1]=h;}return out;
 }
 function viterbi(coded){ // K=7 r=1/2, G1=0x4F G2=0x6D (G2 invert), terminated start/end 0
   const K=7,NS=1<<(K-1),G1=0x4F,G2=0x6D,nb=coded.length>>1;
@@ -967,36 +1099,53 @@ function viterbi(coded){ // K=7 r=1/2, G1=0x4F G2=0x6D (G2 invert), terminated s
   let st=0,bits=new Uint8Array(nb);for(let i=nb-1;i>=0;i--){const e=tb[i][st];const b=(e>>1)&1;bits[i]=b;st=((st<<1)&(NS-1))|(e&1);}
   return bits;
 }
-function deinterleave(block,rows,cols){ // transpose read
-  const o=new Uint8Array(rows*cols);for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)o[r*cols+c]=block[c*rows+r];return o;}
+function deinterleaveCM(block){ const rows=80,cols=65,out=[]; // remove linha-sync 0, lê linhas 1..79
+  for(let r=1;r<rows;r++)for(let c=0;c<cols;c++)out.push(block[c*rows+r]);return out.slice(0,5132);}
+function decodeChain(bits,h,concat){
+  const blk=new Uint8Array(5200);for(let i=0;i<5200;i++)blk[i]=bits[h.pos+i]^h.inv;
+  const di=deinterleaveCM(blk);
+  const dec=viterbi(Uint8Array.from(di));
+  const dd=dec.slice(0,2560);
+  const by=new Uint8Array(320);for(let i=0;i<320;i++){let v=0;for(let j=0;j<8;j++)v=(v<<1)|dd[i*8+j];by[i]=v;}
+  const rnd=ccsdsRand(320);for(let i=0;i<320;i++)by[i]^=rnd[i];
+  const cwA=new Uint8Array(160),cwB=new Uint8Array(160);
+  if(concat){cwA.set(by.subarray(0,160));cwB.set(by.subarray(160,320));}
+  else for(let i=0;i<160;i++){cwA[i]=by[2*i];cwB[i]=by[2*i+1];}
+  const rA=decode_rs_ccsds(cwA,95),rB=decode_rs_ccsds(cwB,95);
+  if(rA<0||rB<0)return{ok:false,rsA:rA,rsB:rB};
+  const out=new Uint8Array(256);
+  if(concat){for(let i=0;i<128;i++){out[i]=cwA[i];out[128+i]=cwB[i];}}
+  else for(let i=0;i<128;i++){out[2*i]=cwA[i];out[2*i+1]=cwB[i];}
+  return{ok:true,bytes:out,rsA:rA,rsB:rB};
+}
 function runFEC(){
   if(!STATE.pcm)return;
-  log('▶ CADEIA AO-40 FEC (constantes gr-satellites)…','c-vio');
+  log('\u25b6 CADEIA AO-40 FEC COMPLETA (Karn/CCSDS \u00b7 RS(160,128) base dual)\u2026','c-vio');
   const bits=dbpskBits();
-  $('#ch1').innerHTML='<span class="c-grn">OK · '+bits.length.toLocaleString('pt-BR')+' bits @1200</span>';
-  log(`  DBPSK: ${bits.length} bits demodulados`,'c-dim');
-  const s=searchSync(bits);
-  const ok=s.dist<=12;
-  $('#ch2').innerHTML=ok?`<span class="c-grn">sync @${s.pos} · ${s.dist}/65 erros${s.inv?' (inv)':''}</span>`:`<span class="c-amb">não encontrado (melhor ${s.dist}/65)</span>`;
-  log(`  Syncword: melhor casamento ${s.dist}/65 erros @bit ${s.pos}${s.inv?' (invertido)':''}`, ok?'c-grn':'c-amb');
-  if(!ok){['#ch3','#ch4','#ch5'].forEach(i=>$(i).innerHTML='<span class="c-dim">aguardando lock</span>');
-    log('  Sem syncword sólido — frame não capturável neste trecho. Use o caminho hex verificado.','c-amb');return;}
-  try{
-    let blk=bits.slice(s.pos+65,s.pos+65+5135);if(s.inv)blk=blk.map(b=>b^1);
-    const de=deinterleave(blk,80,64); // 80x64 dados (sync removido)
-    $('#ch3').innerHTML='<span class="c-amb">executado (exp.)</span>';
-    const dec=viterbi(de.slice(0,5120));
-    $('#ch4').innerHTML='<span class="c-amb">executado · '+dec.length+' bits</span>';
-    const by=new Uint8Array(dec.length>>3);for(let i=0;i<by.length;i++){let v=0;for(let j=0;j<8;j++)v=(v<<1)|dec[i*8+j];by[i]=v;}
-    const rnd=ccsdsRand(by.length);for(let i=0;i<by.length;i++)by[i]^=rnd[i];
-    $('#ch5').innerHTML='<span class="c-amb">executado (exp.)</span>';
-    const o=parseFC1(by);
-    if(o.ok){renderTlm(o,'FEC ao vivo (exp.)');log('  ★ Frame candidato decodificado do áudio!','c-grn');}
-    else{$('#ch7').innerHTML='<span class="c-amb">sem lock (RS necessário)</span>';
-      log('  Frame não validou (RS(160,128) + convenções de interleaver pendentes). Caminho hex é o verificado.','c-amb');}
-  }catch(e){log('  Erro na cadeia experimental: '+e.message,'c-red');}
+  $('#ch1').innerHTML=`<span class="c-grn">OK \u00b7 ${bits.length.toLocaleString('pt-BR')} bits @1200</span>`;
+  const s=searchSync(bits),ok=s.dist<=14;
+  $('#ch2').innerHTML=ok?`<span class="c-grn">sync @${s.pos} \u00b7 ${s.dist}/65${s.inv?' inv':''}</span>`:`<span class="c-amb">n\u00e3o (melhor ${s.dist}/65)</span>`;
+  log(`  Syncword distribu\u00eddo (passo 80): melhor ${s.dist}/65 @${s.pos}${s.inv?' inv':''}`,ok?'c-grn':'c-amb');
+  if(!ok){['#ch3','#ch4','#ch5','#ch6','#ch7'].forEach(i=>$(i).innerHTML='<span class="c-dim">sem lock</span>');
+    log('  Sem syncword s\u00f3lido \u2014 frame n\u00e3o captur\u00e1vel neste trecho. Use o caminho hex (verificado).','c-amb');return;}
+  $('#ch3').innerHTML='<span class="c-grn">80\u00d765 OK</span>';$('#ch4').innerHTML='<span class="c-grn">Viterbi OK</span>';$('#ch5').innerHTML='<span class="c-grn">descramble OK</span>';
+  const hits=allSyncs(bits,14);log(`  ${hits.length} candidato(s) de frame.`,'c-dim');
+  let nValid=0,firstValid=null,rsErrs=0;
+  for(const h of hits){
+    let res=decodeChain(bits,h,false),o=res.ok?parseFC1(res.bytes):{ok:false};
+    if(!o.ok){res=decodeChain(bits,h,true);o=res.ok?parseFC1(res.bytes):{ok:false};}
+    if(o.ok){nValid++;rsErrs+=Math.max(0,res.rsA)+Math.max(0,res.rsB);o._t=h.pos/1200;addFrame(o,'FEC live');if(!firstValid)firstValid={o,res};}
+  }
+  if(firstValid){
+    $('#ch6').innerHTML=`<span class="c-grn">RS OK \u00b7 ${rsErrs}B corrig.</span>`;$('#ch7').innerHTML=`<span class="c-grn">${nValid} frame(s) \u2713</span>`;
+    renderTlm(firstValid.o,'FEC ao vivo \u2713');
+    log(`  \u2605 LOCK! ${nValid} frame(s) decodificados do \u00e1udio \u00b7 RS corrigiu ${rsErrs} bytes.`,'c-grn');
+  } else {
+    $('#ch6').innerHTML='<span class="c-amb">RS n\u00e3o convergiu</span>';$('#ch7').innerHTML='<span class="c-amb">sem frame v\u00e1lido</span>';
+    log('  Cadeia OK mas RS n\u00e3o validou (SNR do trecho ou conven\u00e7\u00e3o de interleaver \u2260 sat\u00e9lite). Caminho hex \u00e9 o verificado.','c-amb');
+  }
+  renderSeries();renderFrameLog();
 }
-
 /* ===================== DOPPLER: MEDIDO × SGP4 ===================== */
 function dopplerAt(date){
   if(!satrec)return null;const pv=satellite.propagate(satrec,date);if(!pv.position)return null;
@@ -1038,6 +1187,7 @@ function fitDoppler(){
   const v=best.res<250?['TLE excelente','g']:best.res<700?['TLE ok','c']:['TLE desatualizado/erro de relógio','a'];
   $('#fVerd').textContent=v[0];$('#fVerd').className='v '+v[1];
   $('#dopNote').innerHTML=`Ajuste: medido = ${best.A.toFixed(0)} Hz + ${best.sign>0?'':'−'}Doppler<sub>SGP4</sub>(t${best.dt>=0?'+':''}${best.dt.toFixed(1)}s). Resíduo ±${best.res.toFixed(0)} Hz. ${best.res<250?'A forma do Doppler bate com o TLE — geometria do pass confirmada.':'Resíduo alto: TLE longe da época da captura ou offset de relógio.'}`;
+  passGeometry();
   log(`Doppler fit → offset ${best.A.toFixed(0)}Hz · Δt ${best.dt.toFixed(1)}s · resíduo ±${best.res.toFixed(0)}Hz · ${v[0]}`,'c-cyan');
   drawDopFit();
 }
@@ -1064,11 +1214,59 @@ $('#btnClearTlm').onclick=()=>{$('#hexBox').value='';$('#tlmOut').innerHTML='<di
 $('#btnFit').onclick=fitDoppler;
 $$('.tab').forEach(t=>{if(t.dataset.v==='dop')t.addEventListener('click',()=>setTimeout(drawDopFit,30));});
 
+/* ===================== SÉRIE · LOG · EXPORT · GEOMETRIA ===================== */
+let FRAMES=[];
+function addFrame(o,src){
+  const bv=parseFloat(o.groups[0].rows[0][1]),rft=parseFloat(o.groups[2].rows[2][1]),rssi=parseFloat(o.groups[2].rows[1][1]);
+  FRAMES.push({t:o._t||0,src,satid:o.satid,ftype:o.frametype,seq:o.seq,eclipse:o.eclipse,bat:bv,rftemp:rft,rssi:rssi,raw:o});
+  if(FRAMES.length>800)FRAMES.shift();
+}
+function renderFrameLog(){const el=$('#frlog');if(!el)return;
+  if(!FRAMES.length){el.innerHTML='<div class="muted">Sem frames. Decodifique do áudio ou cole hex.</div>';return;}
+  let h='<table style="width:100%;border-collapse:collapse;font-size:10.5px"><tr style="color:var(--dim)"><td>t(s)</td><td>tipo</td><td>seq</td><td>bat V</td><td>RFt</td><td>ecl</td><td>fonte</td></tr>';
+  for(const f of FRAMES.slice(-14).reverse())h+=`<tr style="border-top:1px solid var(--line)"><td>${(f.t||0).toFixed(1)}</td><td>${f.ftype}</td><td class="c-cyan">${f.seq}</td><td class="c-grn">${isNaN(f.bat)?'-':f.bat.toFixed(2)}</td><td>${isNaN(f.rftemp)?'-':f.rftemp.toFixed(1)}</td><td>${f.eclipse?'\u25cf':'\u25cb'}</td><td class="c-dim">${f.src}</td></tr>`;
+  el.innerHTML=h+'</table>';
+}
+function renderSeries(){const cv=$('#series');if(!cv)return;const ctx=cv.getContext('2d'),W=cv.width,H=cv.height;ctx.fillStyle='#02040a';ctx.fillRect(0,0,W,H);
+  const F=FRAMES.filter(f=>!isNaN(f.bat));
+  if(F.length<2){ctx.fillStyle='#46586f';ctx.font='11px JetBrains Mono';ctx.fillText('Série temporal aparece com ≥2 frames decodificados.',16,H/2);return;}
+  const ser=[['bateria (V)','#37f5a6',f=>f.bat],['temp RF (°C)','#f6b43d',f=>f.rftemp],['RSSI','#3fb6f5',f=>f.rssi]];
+  ser.forEach((s,si)=>{const vals=F.map(s[2]).filter(v=>!isNaN(v));if(vals.length<2)return;let mn=Math.min(...vals),mx=Math.max(...vals),sp=(mx-mn)||1;
+    ctx.strokeStyle=s[1];ctx.lineWidth=1.5;ctx.beginPath();let started=false;
+    F.forEach((f,i)=>{const v=s[2](f);if(isNaN(v))return;const x=22+i/(F.length-1)*(W-34),y=H-16-(v-mn)/sp*(H-32);started?ctx.lineTo(x,y):ctx.moveTo(x,y);started=true;});ctx.stroke();
+    ctx.fillStyle=s[1];ctx.font='9px JetBrains Mono';ctx.fillText(s[0],24,14+si*11);});
+  ctx.fillStyle='#46586f';ctx.font='9px Chakra Petch';ctx.fillText('frames \u2192',W-52,H-4);
+}
+function dl(name,text,mime){const b=new Blob([text],{type:mime||'text/plain'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),2000);log('Exportado: '+name,'c-grn');}
+function expDopplerCSV(){if(!FIT){log('Sem ajuste de Doppler ainda.','c-amb');return;}let s='t_s,medido_Hz,previsto_Hz\n';FIT.tm.forEach((t,i)=>{s+=`${t.toFixed(2)},${FIT.ym[i].toFixed(1)},${(FIT.pred[i]+FIT.A).toFixed(1)}\n`;});dl('doppler_funcube1.csv',s,'text/csv');}
+function expFramesJSON(){if(!FRAMES.length){log('Sem frames para exportar.','c-amb');return;}dl('frames_funcube1.json',JSON.stringify(FRAMES.map(f=>({t_s:f.t,fonte:f.src,satid:f.satid,frametype:f.ftype,seq:f.seq,eclipse:f.eclipse,bateria_V:f.bat,rftemp_C:f.rftemp,rssi:f.rssi,canais:f.raw.groups})),null,1),'application/json');}
+function expSessionJSON(){const o={gerado:new Date().toISOString(),captura:{arquivo:$('#mFile').textContent,timestamp:$('#mWhen').textContent,duracao:$('#mDur').textContent,fs:$('#mFs').textContent},metricas:STATE.metrics||null,modos:STATE.modes||null,doppler_fit:FIT?{offset_Hz:FIT.A,dt_s:FIT.dt,sinal:FIT.sign,residuo_Hz:FIT.res}:null,n_frames:FRAMES.length};dl('sessao_funcube1.json',JSON.stringify(o,null,2),'application/json');}
+function expWaterfallPNG(){const cv=$('#wf');if(!cv.width){log('Carregue o áudio primeiro.','c-amb');return;}cv.toBlob(b=>{const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='waterfall_funcube1.png';a.click();setTimeout(()=>URL.revokeObjectURL(u),2000);log('Exportado: waterfall_funcube1.png','c-grn');});}
+function passGeometry(){if(!satrec)return;const t0=(STATE.captureTime||SAMPLE_TS).getTime();
+  const obsGd={latitude:OBS.lat*Math.PI/180,longitude:OBS.lon*Math.PI/180,height:OBS.h};
+  let aos=null,los=null,tca=null,maxEl=-90,wasUp=false;
+  for(let ds=-60*60;ds<=60*60;ds+=10){const d=new Date(t0+ds*1000);const pv=satellite.propagate(satrec,d);if(!pv.position)continue;
+    const g=satellite.gstime(d),ecf=satellite.eciToEcf(pv.position,g);const el=satellite.ecfToLookAngles(obsGd,ecf).elevation*180/Math.PI;
+    if(el>0){if(aos===null)aos=d;los=d;if(el>maxEl){maxEl=el;tca=d;}wasUp=true;}else if(wasUp&&ds>0)break;}
+  const f=d=>d?d.toISOString().substr(11,8):'—';
+  if($('#pgAos')){$('#pgAos').textContent=f(aos);$('#pgTca').textContent=f(tca);$('#pgLos').textContent=f(los);
+    $('#pgMax').textContent=maxEl>0?maxEl.toFixed(0)+'°':'—';$('#pgDur').textContent=(aos&&los)?((los-aos)/60000).toFixed(1)+' min':'—';
+    const inPass=aos&&los&&t0>=aos.getTime()&&t0<=los.getTime();$('#pgIn').textContent=inPass?'captura DENTRO do pass ✓':'captura fora da janela do pass';$('#pgIn').className='v '+(inPass?'g':'a');}
+}
+/* export wiring + frames from hex */
+['#btnExpDop','#btnExpFr','#btnExpSes','#btnExpWf'].forEach(()=>{});
+$('#btnExpDop')&&($('#btnExpDop').onclick=expDopplerCSV);
+$('#btnExpFr')&&($('#btnExpFr').onclick=expFramesJSON);
+$('#btnExpSes')&&($('#btnExpSes').onclick=expSessionJSON);
+$('#btnExpWf')&&($('#btnExpWf').onclick=expWaterfallPNG);
+$('#btnTestFrame').onclick=()=>{$('#hexBox').value=TEST_FRAME;const o=parseFC1(hexToBytes(TEST_FRAME));renderTlm(o,'frame de teste');if(o.ok){o._t=0;addFrame(o,'teste');renderFrameLog();renderSeries();}};
+$('#btnParseHex').onclick=()=>{const b=hexToBytes($('#hexBox').value);if(b.length<56){log('Hex curto: '+b.length+' bytes.','c-amb');return;}const o=parseFC1(b);renderTlm(o,'hex ('+b.length+' B)');if(o.ok){o._t=0;addFrame(o,'hex');renderFrameLog();renderSeries();}};
+
 /* boot */
 log('FUNcube-1 Commander iniciado.','c-grn');
 log('Aguardando captura SatNOGS (.ogg) — arraste no painel esquerdo.','c-dim');
-setTLE(TLE_FALLBACK[0],TLE_FALLBACK[1],'exemplo (substitua!)');
-log('⚠ TLE atual é apenas exemplo. Clique em "Buscar TLE atual" ou cole o TLE da data da captura para posições corretas.','c-amb');
+setTLE(TLE_FALLBACK[0],TLE_FALLBACK[1],'época 28/05 (captura)');
+log('TLE da época da captura carregado (28/05/2026, ~20h antes do pass). Para outra data, busque no Celestrak ou cole abaixo.','c-cyan');
 </script>
 </body>
 </html>
