@@ -309,13 +309,16 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
         <div class="head"><span class="ic">▦</span> TELEMETRIA FC-1 DECODIFICADA <span class="tag" id="tlmSrc">—</span></div>
         <div class="body">
           <div class="row" style="margin-bottom:8px">
-            <button class="btn" id="btnTestFrame">▶ Frame de teste real</button>
+            <button class="btn" id="btnDecodeOgg2">▶ Decodificar do meu .ogg</button>
             <button class="btn alt" id="btnClearTlm">limpar</button>
           </div>
-          <label class="lbl">Frame em hex (256 bytes · espaços/quebras ok)</label>
-          <textarea class="fld" id="hexBox" rows="3" placeholder="89 00 00 00 ... (cole aqui um frame do Dashboard oficial ou do Warehouse)"></textarea>
-          <button class="btn alt" id="btnParseHex" style="margin-top:6px">Decodificar frame</button>
-          <div id="tlmOut" style="margin-top:10px"><div class="muted">Sem frame decodificado. Use o botão de teste ou cole um hex.</div></div>
+          <div id="tlmOut" style="margin-top:4px"><div class="muted">Sem frame decodificado. Clique em "Decodificar do meu .ogg" (use sua captura).</div></div>
+          <details style="margin-top:10px">
+            <summary class="muted" style="cursor:pointer">avançado · colar frame hex (Dashboard oficial / Warehouse)</summary>
+            <label class="lbl">Frame em hex (256 bytes · espaços/quebras ok)</label>
+            <textarea class="fld" id="hexBox" rows="3" placeholder="89 00 00 00 ..."></textarea>
+            <button class="btn alt" id="btnParseHex" style="margin-top:6px">Decodificar frame hex</button>
+          </details>
         </div>
       </div>
 
@@ -334,7 +337,7 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
           <div class="kv" id="chain" style="grid-template-columns:auto 1fr">
             <div class="k">1 · DBPSK demod (1200 bd)</div><div class="v" id="ch1">—</div>
             <div class="k">2 · Busca de syncword (65 bit)</div><div class="v" id="ch2">—</div>
-            <div class="k">3 · De-interleave 80×65</div><div class="v" id="ch3">—</div>
+            <div class="k">3 · Convenção interleaver (auto)</div><div class="v" id="ch3">—</div>
             <div class="k">4 · Viterbi K=7 [0x4F,0x6D⁻]</div><div class="v" id="ch4">—</div>
             <div class="k">5 · Descrambler CCSDS</div><div class="v" id="ch5">—</div>
             <div class="k">6 · 2× Reed-Solomon (160,128)</div><div class="v r" id="ch6">RS pendente</div>
@@ -1076,14 +1079,25 @@ function dbpskBits(){
   for(let i=1;i<sy.length;i++){const d=sy[i][0]*sy[i-1][0]+sy[i][1]*sy[i-1][1];bits[i-1]=d<0?1:0;} // DBPSK: phase change π => 1
   return bits;
 }
-function searchSync(bits){ // sync DISTRIBUÍDO: 65 bits a passo 80 (matriz 80x65, leitura por coluna)
-  const S=[...SYNC65].map(c=>+c),L=S.length,FR=5200;let best={pos:-1,dist:99,inv:0};const last=bits.length-FR;
-  for(let inv=0;inv<2;inv++)for(let p=0;p<=last;p++){let d=0;for(let k=0;k<L;k++){if((bits[p+k*80]^inv)!==S[k]){if(++d>=best.dist)break;}}if(d<best.dist)best={pos:p,dist:d,inv};}
+function demodCoherent(){ // Costas (BPSK) + Gardner timing -> bits coerentes (validado BER~0)
+  const dur=STATE.pcm.length/STATE.fs,decim=10,win=Math.min(dur,120);
+  const seg=basebandSegment(0,win,decim),fs2=seg.fs,sps=fs2/(STATE.baud||1200),n=seg.re.length;
+  const cr=new Float64Array(n);let ph=0,fr=0;const al=0.01,be=al*al/4;
+  for(let i=0;i<n;i++){const c=Math.cos(ph),s=Math.sin(ph);const I=seg.re[i]*c+seg.im[i]*s,Q=-seg.re[i]*s+seg.im[i]*c;cr[i]=I;const e=(I>=0?1:-1)*Q;fr+=be*e;ph+=fr+al*e;}
+  const Kp=0.03,Ki=Kp*Kp/4;const bits=[];let onPos=sps*2,prevOn=0,w=0;
+  while(onPos<n-sps-2){const i=Math.floor(onPos),mu=onPos-i;const yOn=cr[i]*(1-mu)+cr[i+1]*mu;
+    const jm=onPos-sps/2,j=Math.floor(jm),mv=jm-j;const yMid=cr[j]*(1-mv)+cr[j+1]*mv;
+    const e=-(yMid*(yOn-prevOn));w+=Ki*e;onPos+=sps+w+Kp*e;bits.push(yOn>=0?1:0);prevOn=yOn;}
+  return Uint8Array.from(bits);
+}
+function searchSyncStride(bits,stride){
+  const S=[...SYNC65].map(c=>+c),L=65,FR=5200;let best={pos:-1,dist:99,inv:0};const last=bits.length-FR;
+  for(let inv=0;inv<2;inv++)for(let p=0;p<=last;p++){let d=0;for(let k=0;k<L;k++){if((bits[p+k*stride]^inv)!==S[k]){if(++d>=best.dist)break;}}if(d<best.dist)best={pos:p,dist:d,inv};}
   return best;
 }
-function allSyncs(bits,thr){
-  const S=[...SYNC65].map(c=>+c),L=S.length,FR=5200,hits=[];const last=bits.length-FR;
-  for(let inv=0;inv<2;inv++)for(let p=0;p<=last;p++){let d=0;for(let k=0;k<L;k++){if((bits[p+k*80]^inv)!==S[k]){if(++d>thr)break;}}if(d<=thr)hits.push({pos:p,dist:d,inv});}
+function allSyncsStride(bits,stride,thr){
+  const S=[...SYNC65].map(c=>+c),L=65,FR=5200,hits=[];const last=bits.length-FR;
+  for(let inv=0;inv<2;inv++)for(let p=0;p<=last;p++){let d=0;for(let k=0;k<L;k++){if((bits[p+k*stride]^inv)!==S[k]){if(++d>thr)break;}}if(d<=thr)hits.push({pos:p,dist:d,inv});}
   hits.sort((a,b)=>a.pos-b.pos);const out=[];for(const h of hits){if(!out.length||h.pos-out[out.length-1].pos>2000)out.push(h);else if(h.dist<out[out.length-1].dist)out[out.length-1]=h;}return out;
 }
 function viterbi(coded){ // K=7 r=1/2, G1=0x4F G2=0x6D (G2 invert), terminated start/end 0
@@ -1098,55 +1112,71 @@ function viterbi(coded){ // K=7 r=1/2, G1=0x4F G2=0x6D (G2 invert), terminated s
   let st=0,bits=new Uint8Array(nb);for(let i=nb-1;i>=0;i--){const e=tb[i][st];const b=(e>>1)&1;bits[i]=b;st=((st<<1)&(NS-1))|(e&1);}
   return bits;
 }
-function deinterleaveCM(block){ const rows=80,cols=65,out=[]; // remove linha-sync 0, lê linhas 1..79
-  for(let r=1;r<rows;r++)for(let c=0;c<cols;c++)out.push(block[c*rows+r]);return out.slice(0,5132);}
-function decodeChain(bits,h,concat){
-  const blk=new Uint8Array(5200);for(let i=0;i<5200;i++)blk[i]=bits[h.pos+i]^h.inv;
-  const di=deinterleaveCM(blk);
+const DEINT={
+  'distrib\u00b7A':b=>{const o=[];for(let r=1;r<80;r++)for(let c=0;c<65;c++)o.push(b[c*80+r]);return o.slice(0,5132);},
+  'distrib\u00b7B':b=>{const o=[];for(let c=0;c<65;c++)for(let r=1;r<80;r++)o.push(b[c*80+r]);return o.slice(0,5132);},
+  'cont\u00edguo':b=>Array.from(b.slice(65,65+5132)),
+  'cont\u00edguo\u00b7D':b=>{const o=[],d=b.slice(65);for(let r=0;r<79;r++)for(let c=0;c<65;c++)o.push(d[c*79+r]||0);return o.slice(0,5132);}
+};
+const SYNCMODE={'distrib\u00b7A':80,'distrib\u00b7B':80,'cont\u00edguo':1,'cont\u00edguo\u00b7D':1};
+function extractBlock(bits,h){const blk=new Uint8Array(5200);for(let i=0;i<5200;i++)blk[i]=bits[h.pos+i]^h.inv;return blk;}
+function decodeFromBlock(block,deintName,order,basis){
+  const di=DEINT[deintName](block);
   const dec=viterbi(Uint8Array.from(di));
   const dd=dec.slice(0,2560);
   const by=new Uint8Array(320);for(let i=0;i<320;i++){let v=0;for(let j=0;j<8;j++)v=(v<<1)|dd[i*8+j];by[i]=v;}
   const rnd=ccsdsRand(320);for(let i=0;i<320;i++)by[i]^=rnd[i];
   const cwA=new Uint8Array(160),cwB=new Uint8Array(160);
-  if(concat){cwA.set(by.subarray(0,160));cwB.set(by.subarray(160,320));}
+  if(order==='concat'){cwA.set(by.subarray(0,160));cwB.set(by.subarray(160,320));}
   else for(let i=0;i<160;i++){cwA[i]=by[2*i];cwB[i]=by[2*i+1];}
-  const rA=decode_rs_ccsds(cwA,95),rB=decode_rs_ccsds(cwB,95);
+  let rA,rB;
+  if(basis==='dual'){rA=decode_rs_ccsds(cwA,95);rB=decode_rs_ccsds(cwB,95);}
+  else{rA=decode_rs(cwA,95);rB=decode_rs(cwB,95);}
   if(rA<0||rB<0)return{ok:false,rsA:rA,rsB:rB};
   const out=new Uint8Array(256);
-  if(concat){for(let i=0;i<128;i++){out[i]=cwA[i];out[128+i]=cwB[i];}}
+  if(order==='concat'){for(let i=0;i<128;i++){out[i]=cwA[i];out[128+i]=cwB[i];}}
   else for(let i=0;i<128;i++){out[2*i]=cwA[i];out[2*i+1]=cwB[i];}
   return{ok:true,bytes:out,rsA:rA,rsB:rB};
 }
 function runFEC(){
   if(!STATE.pcm)return;
-  log('\u25b6 CADEIA AO-40 FEC COMPLETA (Karn/CCSDS \u00b7 RS(160,128) base dual)\u2026','c-vio');
-  const bits=dbpskBits();
-  $('#ch1').innerHTML=`<span class="c-grn">OK \u00b7 ${bits.length.toLocaleString('pt-BR')} bits @1200</span>`;
-  const s=searchSync(bits),ok=s.dist<=14;
-  $('#ch2').innerHTML=ok?`<span class="c-grn">sync @${s.pos} \u00b7 ${s.dist}/65${s.inv?' inv':''}</span>`:`<span class="c-amb">n\u00e3o (melhor ${s.dist}/65)</span>`;
-  log(`  Syncword distribu\u00eddo (passo 80): melhor ${s.dist}/65 @${s.pos}${s.inv?' inv':''}`,ok?'c-grn':'c-amb');
-  if(!ok){['#ch3','#ch4','#ch5','#ch6','#ch7'].forEach(i=>$(i).innerHTML='<span class="c-dim">sem lock</span>');
-    $('#decRes').innerHTML=`<span class="c-amb">✗ sem syncword no .ogg (melhor ${s.dist}/65)</span>`;
-    log('  Sem syncword s\u00f3lido \u2014 frame n\u00e3o captur\u00e1vel neste trecho. Use o caminho hex (verificado).','c-amb');return;}
-  $('#ch3').innerHTML='<span class="c-grn">80\u00d765 OK</span>';$('#ch4').innerHTML='<span class="c-grn">Viterbi OK</span>';$('#ch5').innerHTML='<span class="c-grn">descramble OK</span>';
-  const hits=allSyncs(bits,14);log(`  ${hits.length} candidato(s) de frame.`,'c-dim');
-  let nValid=0,firstValid=null,rsErrs=0;
-  for(const h of hits){
-    let res=decodeChain(bits,h,false),o=res.ok?parseFC1(res.bytes):{ok:false};
-    if(!o.ok){res=decodeChain(bits,h,true);o=res.ok?parseFC1(res.bytes):{ok:false};}
-    if(o.ok){nValid++;rsErrs+=Math.max(0,res.rsA)+Math.max(0,res.rsB);o._t=h.pos/1200;addFrame(o,'FEC live');if(!firstValid)firstValid={o,res};}
-  }
-  if(firstValid){
-    $('#ch6').innerHTML=`<span class="c-grn">RS OK \u00b7 ${rsErrs}B corrig.</span>`;$('#ch7').innerHTML=`<span class="c-grn">${nValid} frame(s) \u2713</span>`;
-    $('#decRes').innerHTML=`<span class="c-grn">✓ ${nValid} frame(s) decodificados do seu .ogg</span>`;
-    renderTlm(firstValid.o,'FEC ao vivo \u2713');
-    log(`  \u2605 LOCK! ${nValid} frame(s) decodificados do \u00e1udio \u00b7 RS corrigiu ${rsErrs} bytes.`,'c-grn');
-  } else {
-    $('#ch6').innerHTML='<span class="c-amb">RS n\u00e3o convergiu</span>';$('#ch7').innerHTML='<span class="c-amb">sem frame v\u00e1lido</span>';
-    $('#decRes').innerHTML='<span class="c-amb">✗ sync achado, mas RS não validou — veja o console</span>';
-    log('  Cadeia OK mas RS n\u00e3o validou (SNR do trecho ou conven\u00e7\u00e3o de interleaver \u2260 sat\u00e9lite). Caminho hex \u00e9 o verificado.','c-amb');
-  }
+  log('\u25b6 DECODE DO SEU .OGG \u2014 demod coerente (Costas+Gardner) + varredura de conven\u00e7\u00f5es (gate por RS)\u2026','c-vio');
+  const streams=[['coerente',demodCoherent()],['diferencial',dbpskBits()]];
+  $('#ch1').innerHTML=`<span class="c-grn">OK \u00b7 ${streams[0][1].length.toLocaleString('pt-BR')} s\u00edmbolos (coerente) + diferencial</span>`;
+  const pairs=Object.keys(DEINT);
+  let best=null;
+  for(const [sname,bits] of streams)for(const pname of pairs){const sy=searchSyncStride(bits,SYNCMODE[pname]);if(!best||sy.dist<best.s.dist)best={sname,bits,pname,s:sy};}
+  const okSync=best.s.dist<=16;
+  $('#ch2').innerHTML=okSync?`<span class="c-grn">${best.s.dist}/65 \u00b7 ${best.pname} \u00b7 ${best.sname}</span>`:`<span class="c-amb">n\u00e3o (melhor ${best.s.dist}/65)</span>`;
+  log(`  Melhor syncword: ${best.s.dist}/65 erros \u00b7 padr\u00e3o ${best.pname} \u00b7 stream ${best.sname} @bit ${best.s.pos}${best.s.inv?' (inv)':''}`,okSync?'c-grn':'c-amb');
+  if(!okSync){['#ch3','#ch4','#ch5','#ch6','#ch7'].forEach(i=>$(i).innerHTML='<span class="c-dim">sem lock</span>');
+    $('#decRes').innerHTML=`<span class="c-amb">\u2717 sem syncword no .ogg (melhor ${best.s.dist}/65)</span>`;
+    log('  Sem syncword s\u00f3lido \u2014 sem frame captur\u00e1vel neste trecho. O caminho hex (av\u00e7ado) \u00e9 o verificado.','c-amb');return;}
+  $('#ch4').innerHTML='<span class="c-grn">Viterbi OK</span>';$('#ch5').innerHTML='<span class="c-grn">descramble OK</span>';
+  const blk=extractBlock(best.bits,best.s);let win=null;
+  for(const order of ['eo','concat']){for(const basis of ['dual','plain']){const r=decodeFromBlock(blk,best.pname,order,basis);if(r.ok){const o=parseFC1(r.bytes);if(o.ok){win={order,basis};break;}}}if(win)break;}
+  $('#ch3').innerHTML=`<span class="${win?'c-grn':'c-amb'}">${best.pname}${win?' \u2713':''}</span>`;
+  if(!win){$('#ch6').innerHTML='<span class="c-amb">RS n\u00e3o validou</span>';$('#ch7').innerHTML='<span class="c-amb">sem frame</span>';
+    $('#decRes').innerHTML='<span class="c-amb">\u2717 sync ok, mas RS n\u00e3o validou \u2014 veja o console</span>';
+    log(`  Sync encontrado (${best.s.dist}/65) mas nenhuma das conven\u00e7\u00f5es validou pelo RS. Prov\u00e1vel SNR baixo no trecho. Use o caminho hex (verificado).`,'c-amb');return;}
+  log(`  \u2714 Convenção travada: ${best.pname} \u00b7 RS ${win.order}/${win.basis} \u00b7 demod ${best.sname}`,'c-grn');
+  const hits=allSyncsStride(best.bits,SYNCMODE[best.pname],16);
+  let nValid=0,rsErrs=0,first=null;
+  for(const h of hits){const r=decodeFromBlock(extractBlock(best.bits,h),best.pname,win.order,win.basis);
+    if(r.ok){const o=parseFC1(r.bytes);if(o.ok){nValid++;rsErrs+=Math.max(0,r.rsA)+Math.max(0,r.rsB);o._t=h.pos/1200;addFrame(o,'FEC live');if(!first)first=o;}}}
+  $('#ch6').innerHTML=`<span class="c-grn">RS OK \u00b7 ${rsErrs}B corrig.</span>`;$('#ch7').innerHTML=`<span class="c-grn">${nValid} frame(s) \u2713</span>`;
+  $('#decRes').innerHTML=`<span class="c-grn">\u2713 ${nValid} frame(s) decodificados do seu .ogg</span>`;
+  if(first)renderTlm(first,'FEC ao vivo \u2713');
+  log(`  \u2605 LOCK! ${nValid} frame(s) do \u00e1udio \u00b7 RS corrigiu ${rsErrs} bytes \u00b7 ${best.pname}/${win.order}/${win.basis}.`,'c-grn');
   renderSeries();renderFrameLog();
+}
+function decodeFromOgg(){
+  if(!STATE.pcm){log('\u26a0 Nenhum .ogg carregado. Solte sua captura no painel "Ingest\u00e3o de captura".','c-amb');var d=$('#decRes');if(d)d.innerHTML='<span class="c-amb">sem .ogg</span>';return;}
+  $('#cstat').innerHTML='<span class="spinner"></span> decodificando seu .ogg';var dr=$('#decRes');if(dr)dr.innerHTML='<span class="spinner"></span> tentando\u2026';
+  log('\u2501\u2501\u2501 DECODE DIRETO DO SEU .OGG \u2501\u2501\u2501','c-vio');
+  setTimeout(()=>{try{if(!STATE.track){const wf=computeWaterfall();drawWaterfall(wf);metricsFromWaterfall(wf);}if(!STATE.baud)STATE.baud=estimateBaud();runFEC();}
+    catch(e){log('Erro no decode: '+e.message,'c-red');var d2=$('#decRes');if(d2)d2.innerHTML='<span class="c-red">erro \u2014 veja o console</span>';}
+    $('#cstat').textContent='conclu\u00eddo';},40);
 }
 /* ===================== DOPPLER: MEDIDO × SGP4 ===================== */
 function dopplerAt(date){
@@ -1210,7 +1240,6 @@ function drawDopFit(){
 }
 
 /* ===================== WIRING NOVO ===================== */
-$('#btnTestFrame').onclick=()=>{$('#hexBox').value=TEST_FRAME;renderTlm(parseFC1(hexToBytes(TEST_FRAME)),'frame de teste');};
 $('#btnParseHex').onclick=()=>{const b=hexToBytes($('#hexBox').value);if(b.length<56){log('Hex curto: '+b.length+' bytes.','c-amb');return;}renderTlm(parseFC1(b),'hex colado ('+b.length+' B)');};
 $('#btnClearTlm').onclick=()=>{$('#hexBox').value='';$('#tlmOut').innerHTML='<div class="muted">Sem frame decodificado.</div>';$('#tlmSrc').textContent='—';};
 $('#btnFit').onclick=fitDoppler;
@@ -1261,21 +1290,8 @@ $('#btnExpDop')&&($('#btnExpDop').onclick=expDopplerCSV);
 $('#btnExpFr')&&($('#btnExpFr').onclick=expFramesJSON);
 $('#btnExpSes')&&($('#btnExpSes').onclick=expSessionJSON);
 $('#btnExpWf')&&($('#btnExpWf').onclick=expWaterfallPNG);
-$('#btnDecodeOgg')&&($('#btnDecodeOgg').onclick=()=>{
-  if(!STATE.pcm){log('\u26a0 Nenhum .ogg carregado. Solte sua captura no painel "Ingestão de captura" e tente de novo.','c-amb');$('#decRes').innerHTML='<span class="c-amb">sem .ogg carregado</span>';$('#cstat').textContent='sem .ogg';return;}
-  $('#cstat').innerHTML='<span class="spinner"></span> decodificando seu .ogg';
-  $('#decRes').innerHTML='<span class="spinner"></span> tentando…';
-  log('\u2501\u2501\u2501 TENTATIVA DE DECODE DIRETO DO SEU .OGG \u2501\u2501\u2501','c-vio');
-  setTimeout(()=>{
-    try{
-      if(!STATE.track){const wf=computeWaterfall();drawWaterfall(wf);metricsFromWaterfall(wf);}
-      if(!STATE.baud)STATE.baud=estimateBaud();
-      runFEC();
-    }catch(e){log('Erro no decode: '+e.message,'c-red');$('#decRes').innerHTML='<span class="c-red">erro — veja o console</span>';}
-    $('#cstat').textContent='concluído';
-  },40);
-});
-$('#btnTestFrame').onclick=()=>{$('#hexBox').value=TEST_FRAME;const o=parseFC1(hexToBytes(TEST_FRAME));renderTlm(o,'frame de teste');if(o.ok){o._t=0;addFrame(o,'teste');renderFrameLog();renderSeries();}};
+$('#btnDecodeOgg')&&($('#btnDecodeOgg').onclick=decodeFromOgg);
+$('#btnDecodeOgg2')&&($('#btnDecodeOgg2').onclick=decodeFromOgg);
 $('#btnParseHex').onclick=()=>{const b=hexToBytes($('#hexBox').value);if(b.length<56){log('Hex curto: '+b.length+' bytes.','c-amb');return;}const o=parseFC1(b);renderTlm(o,'hex ('+b.length+' B)');if(o.ok){o._t=0;addFrame(o,'hex');renderFrameLog();renderSeries();}};
 
 /* boot */
