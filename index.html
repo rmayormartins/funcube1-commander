@@ -1208,14 +1208,19 @@ function runFEC(){
   if(!STATE.pcm)return;
   log('\u25b6 DECODE DO SEU .OGG \u2014 demod coerente (Costas+Gardner) + varredura de conven\u00e7\u00f5es (gate por RS)\u2026','c-vio');
   const carr=STATE.carriers||[],nb=carr.filter(c=>c.kind==='BPSK').length;
-  log(`  Detec\u00e7\u00e3o: ${carr.length} portadora(s) \u2014 ${nb} BPSK, ${carr.length-nb} estreita(s)/CW.`,'c-dim');
-  if(carr.length&&nb===0){
+  const v=(STATE.modes&&STATE.modes.verdict)||'';
+  const isCW=/CW/i.test(v),isBPSK=/BPSK/i.test(v);
+  log(`  Veredito: ${v||'?'} \u00b7 portadoras: ${nb} BPSK / ${carr.length-nb} estreita(s).`,'c-dim');
+  // rota CW só quando o veredito é CW E não há raia BPSK detectada (coerência com o painel de modo)
+  if(isCW && !isBPSK && nb===0){
     log('  \u2192 Sinal \u00e9 CW/portadora estreita \u2014 a telemetria de tens\u00e3o/temperatura N\u00c3O est\u00e1 aqui (ela vem no BPSK). Rodando decoder CW/Morse\u2026','c-amb');
     $('#ch1').innerHTML='<span class="c-amb">CW (sem BPSK)</span>';['#ch2','#ch3','#ch4','#ch5','#ch6','#ch7'].forEach(i=>$(i).innerHTML='<span class="c-dim">N/A (CW)</span>');
     $('#decRes').innerHTML='<span class="c-amb">CW/portadora \u2014 Morse no console</span>';
-    cwDecode();return;
+    cwDecode();
+    log('  \u2139 FUNcube-1: na 145.935 sai s\u00f3 portadora estreita quando ele est\u00e1 em baixa pot\u00eancia (eclipse/transponder/modo seguro, 20\u201330 mW). O BPSK 1200 decod\u00edvel exige passagem ILUMINADA em modo educacional/alta pot\u00eancia (300 mW) \u2014 a\u00ed a raia fica larga (~2\u20133 kHz).','c-dim');
+    return;
   }
-  if(nb>0)log(`  \u2192 BPSK detectado (${nb} raia larga) \u2014 rodando cadeia FEC do FUNcube-1.`,'c-grn');
+  log('  \u2192 Rodando cadeia BPSK FEC (conforme veredito de modo).','c-grn');
   const streams=[['coerente',demodCoherent()],['diferencial',dbpskBits()]];
   $('#ch1').innerHTML=`<span class="c-grn">OK \u00b7 ${streams[0][1].length.toLocaleString('pt-BR')} s\u00edmbolos (coerente) + diferencial</span>`;
   const pairs=Object.keys(DEINT);
@@ -1226,7 +1231,8 @@ function runFEC(){
   log(`  Melhor syncword: ${best.s.dist}/65 erros \u00b7 padr\u00e3o ${best.pname} \u00b7 stream ${best.sname} @bit ${best.s.pos}${best.s.inv?' (inv)':''}`,okSync?'c-grn':'c-amb');
   if(!okSync){['#ch3','#ch4','#ch5','#ch6','#ch7'].forEach(i=>$(i).innerHTML='<span class="c-dim">sem lock</span>');
     $('#decRes').innerHTML=`<span class="c-amb">\u2717 sem syncword no .ogg (melhor ${best.s.dist}/65)</span>`;
-    log('  Sem syncword s\u00f3lido \u2014 sem frame captur\u00e1vel neste trecho. O caminho hex (av\u00e7ado) \u00e9 o verificado.','c-amb');return;}
+    log('  Sem syncword s\u00f3lido \u2014 sem frame captur\u00e1vel neste trecho. O caminho hex (av\u00e7ado) \u00e9 o verificado.','c-amb');
+    log('  \u2139 Se a raia for forte mas estreita (~<400 Hz), \u00e9 portadora de baixa pot\u00eancia do FUNcube-1, n\u00e3o BPSK. Decode exige passagem iluminada em modo educacional (300 mW), raia larga ~2\u20133 kHz.','c-dim');return;}
   $('#ch4').innerHTML='<span class="c-grn">Viterbi OK</span>';$('#ch5').innerHTML='<span class="c-grn">descramble OK</span>';
   const blk=extractBlock(best.bits,best.s);let win=null;
   for(const order of ['eo','concat']){for(const basis of ['dual','plain']){const r=decodeFromBlock(blk,best.pname,order,basis);if(r.ok){const o=parseFC1(r.bytes);if(o.ok){win={order,basis};break;}}}if(win)break;}
