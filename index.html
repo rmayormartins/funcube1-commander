@@ -1131,15 +1131,29 @@ function dbpskBits(){
   for(let i=1;i<sy.length;i++){const d=sy[i][0]*sy[i-1][0]+sy[i][1]*sy[i-1][1];bits[i-1]=d<0?1:0;} // DBPSK: phase change π => 1
   return bits;
 }
-function demodCoherent(){ // Costas (BPSK) + Gardner timing -> bits coerentes (validado BER~0)
+function rrcTaps(sps,span,beta){const N=sps*span,h=new Float64Array(N+1);let e=0;
+  for(let i=0;i<=N;i++){const t=(i-N/2)/sps;let v;
+    if(Math.abs(t)<1e-8)v=1-beta+4*beta/Math.PI;
+    else if(Math.abs(Math.abs(4*beta*t)-1)<1e-6)v=(beta/Math.SQRT2)*((1+2/Math.PI)*Math.sin(Math.PI/(4*beta))+(1-2/Math.PI)*Math.cos(Math.PI/(4*beta)));
+    else v=(Math.sin(Math.PI*t*(1-beta))+4*beta*t*Math.cos(Math.PI*t*(1+beta)))/(Math.PI*t*(1-Math.pow(4*beta*t,2)));
+    h[i]=v;e+=v*v;}
+  const g=1/Math.sqrt(e);for(let i=0;i<=N;i++)h[i]*=g;return h;}
+function demodCoherent(){ // estilo gr-satellites: AGC + RRC matched filter + Costas + M&M (validado BER~0)
   const dur=STATE.pcm.length/STATE.fs,decim=10,win=Math.min(dur,120);
-  const seg=basebandSegment(0,win,decim),fs2=seg.fs,sps=fs2/1200,n=seg.re.length; // 1200 bd de spec
-  const cr=new Float64Array(n);let ph=0,fr=0;const al=0.01,be=al*al/4;
-  for(let i=0;i<n;i++){const c=Math.cos(ph),s=Math.sin(ph);const I=seg.re[i]*c+seg.im[i]*s,Q=-seg.re[i]*s+seg.im[i]*c;cr[i]=I;const e=(I>=0?1:-1)*Q;fr+=be*e;ph+=fr+al*e;}
-  const Kp=0.03,Ki=Kp*Kp/4;const bits=[];let onPos=sps*2,prevOn=0,w=0;
-  while(onPos<n-sps-2){const i=Math.floor(onPos),mu=onPos-i;const yOn=cr[i]*(1-mu)+cr[i+1]*mu;
-    const jm=onPos-sps/2,j=Math.floor(jm),mv=jm-j;const yMid=cr[j]*(1-mv)+cr[j+1]*mv;
-    const e=-(yMid*(yOn-prevOn));w+=Ki*e;onPos+=sps+w+Kp*e;bits.push(yOn>=0?1:0);prevOn=yOn;}
+  const seg=basebandSegment(0,win,decim),fs2=seg.fs,sps=fs2/1200,n=seg.re.length;
+  // AGC (normaliza pela energia)
+  let p=0;for(let i=0;i<n;i++)p+=seg.re[i]*seg.re[i]+seg.im[i]*seg.im[i];const g=1/(Math.sqrt(p/n)+1e-9);
+  // RRC matched filter (same), em I e Q
+  const h=rrcTaps(Math.round(sps),11,0.35),HL=h.length,off=HL>>1;
+  const fre=new Float64Array(n),fim=new Float64Array(n);
+  for(let i=0;i<n;i++){let ar=0,ai=0;for(let k=0;k<HL;k++){const j=i+k-off;if(j>=0&&j<n){ar+=seg.re[j]*h[k];ai+=seg.im[j]*h[k];}}fre[i]=ar*g;fim[i]=ai*g;}
+  // Costas (2ª ordem)
+  const cr=new Float64Array(n);let ph=0,fq=0;const al=0.02,be=al*al/4;
+  for(let i=0;i<n;i++){const c=Math.cos(ph),s=Math.sin(ph);const I=fre[i]*c+fim[i]*s,Q=-fre[i]*s+fim[i]*c;cr[i]=I;const e=(I>=0?1:-1)*Q;fq+=be*e;ph+=fq+al*e;}
+  // Mueller-Muller timing (validado)
+  const Kp=0.05,Ki=Kp*Kp/4;const bits=[];let pos=sps*2,w=0,pY=0,pA=0;
+  while(pos<n-sps-2){const i=Math.floor(pos),mu=pos-i;const y=cr[i]*(1-mu)+cr[i+1]*mu;const a=y>=0?1:-1;
+    const e=pA*y-a*pY;w+=Ki*e;pos+=sps+w+Kp*e;bits.push(y>=0?1:0);pY=y;pA=a;}
   return Uint8Array.from(bits);
 }
 function searchSyncStride(bits,stride){
