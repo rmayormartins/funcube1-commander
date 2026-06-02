@@ -270,7 +270,7 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
             <div class="cwrap"><canvas id="wf" width="700" height="520"></canvas>
               <span class="canvtxt" id="wfNote" style="right:8px;top:6px">—</span></div>
             <div class="row" style="justify-content:space-between;margin-top:6px">
-              <span class="axlbl">◀ Frequência de áudio (kHz) ▶ · vertical = tempo (topo = fim do pass)</span>
+              <span class="axlbl">◀ Frequência de áudio (kHz) ▶ · vertical = tempo (topo = fim do pass) · <span style="color:#3fb6f5">▮ BPSK</span> <span style="color:#f6b43d">▮ CW/portadora</span></span>
               <label class="row" style="gap:5px"><input type="checkbox" id="ckDop" checked> <span class="axlbl">curva Doppler</span></label>
             </div>
           </div>
@@ -323,11 +323,6 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
       </div>
 
       <div class="panel">
-        <div class="head"><span class="ic">▮</span> CONSOLE DE DECODIFICAÇÃO <span class="tag" id="cstat">idle</span></div>
-        <div class="body tight"><div id="console"></div></div>
-      </div>
-
-      <div class="panel">
         <div class="head"><span class="ic">⌬</span> CADEIA AO-40 FEC <span class="tag">Phil Karn KA9Q</span></div>
         <div class="body">
           <div class="row" style="margin-bottom:9px">
@@ -343,7 +338,20 @@ label.lbl{font-size:10px;color:var(--dim);letter-spacing:.5px;display:block;marg
             <div class="k">6 · 2× Reed-Solomon (160,128)</div><div class="v r" id="ch6">RS pendente</div>
             <div class="k">7 · Parser frame 256 B</div><div class="v" id="ch7">—</div>
           </div>
-          <div class="note">Constantes reais do gr-satellites (D. Estévez). Os passos 1–2 rodam <b>ao vivo</b> no seu .ogg (a busca de syncword indica se há frame capturável). Os passos 3–6 estão implementados e marcados <b>experimental</b>: o lock ao vivo depende de SNR e das convenções exatas do interleaver/RS. <b>Caminho verificado:</b> cole um frame hex (Dashboard oficial → "copy frame", ou o Warehouse) no painel abaixo — o parser de canais é bit-exato.</div>
+          <div class="note">Constantes reais do gr-satellites (D. Estévez). Os passos 1–2 rodam <b>ao vivo</b> no seu .ogg (a busca de syncword indica se há frame capturável). Os passos 3–6 estão implementados e marcados <b>experimental</b>: o lock ao vivo depende de SNR e das convenções exatas do interleaver/RS. <b>Caminho verificado:</b> cole um frame hex (Dashboard oficial → "copy frame", ou o Warehouse) no painel de telemetria — o parser de canais é bit-exato.</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="head"><span class="ic">▮</span> CONSOLE DE DECODIFICAÇÃO <span class="tag" id="cstat">idle</span></div>
+        <div class="body tight"><div id="console"></div></div>
+      </div>
+
+      <div class="panel">
+        <div class="head"><span class="ic">⬡</span> CONSOLE HEX · FRAMES BRUTOS <span class="tag" id="hexstat">vazio</span></div>
+        <div class="body tight">
+          <div class="row" style="padding:6px 4px"><button class="btn alt" id="btnCopyHex">copiar último</button><span class="muted" id="hexnote">o hex aparece aqui quando um frame é decodificado (ao vivo ou colado)</span></div>
+          <pre id="hexcon" style="background:#02040a;border:1px solid var(--line);border-radius:8px;margin:0;padding:9px 11px;font-size:11px;line-height:1.5;max-height:220px;overflow:auto;color:var(--grn);white-space:pre">—</pre>
         </div>
       </div>
 
@@ -579,7 +587,51 @@ function drawWaterfall(wf){
     ctx.stroke();
   }
   cv.style.maxHeight='560px';cv.style.objectFit='fill';
+  drawCarrierLabels(ctx,wf,W,H);
   $('#wfNote').textContent=(W*wf.binHz/1000).toFixed(0)+' kHz';
+}
+function detectCarriers(wf){
+  const W=wf.bins,H=wf.rows,mid=Math.floor(H/2),avg=new Float32Array(W);
+  for(let b=0;b<W;b++){let a=0,c=0;for(let r=mid-8;r<=mid+8;r++){if(r>=0&&r<H){a+=wf.data[r*W+b];c++;}}avg[b]=a/c;}
+  const sorted=[...avg].sort((a,b)=>a-b),nf=sorted[Math.floor(sorted.length*0.5)];
+  const lo=Math.floor(1500/wf.binHz),hi=Math.min(W-3,Math.floor(15000/wf.binHz)),cands=[];
+  for(let b=lo+2;b<hi;b++){
+    if(avg[b]>nf+8&&avg[b]>=avg[b-1]&&avg[b]>=avg[b+1]&&avg[b]>avg[b-2]&&avg[b]>avg[b+2]){
+      const pk=avg[b];let l=b,r=b;while(l>lo&&avg[l]>pk-10)l--;while(r<hi&&avg[r]>pk-10)r++;
+      cands.push({bin:b,hz:b*wf.binHz,lvl:pk-nf,wHz:(r-l)*wf.binHz});}
+  }
+  cands.sort((a,b)=>a.hz-b.hz);const out=[];
+  for(const c of cands){if(out.length&&c.hz-out[out.length-1].hz<700){if(c.lvl>out[out.length-1].lvl)out[out.length-1]=c;}else out.push(c);}
+  out.sort((a,b)=>b.lvl-a.lvl);const top=out.slice(0,5);
+  top.forEach(c=>c.kind=c.wHz>1500?'BPSK':'CW');top.sort((a,b)=>a.hz-b.hz);
+  STATE.carriers=top;return top;
+}
+function drawCarrierLabels(ctx,wf,W,H){
+  const cs=detectCarriers(wf);ctx.font='10px JetBrains Mono';ctx.textBaseline='top';
+  for(const c of cs){const x=c.bin,col=c.kind==='BPSK'?'#3fb6f5':'#f6b43d';
+    ctx.globalAlpha=.45;ctx.strokeStyle=col;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
+    const lbl=c.kind,tx=Math.min(W-26,Math.max(1,x-7));
+    ctx.fillStyle=col;ctx.fillRect(tx-1,1,lbl.length*6+3,12);ctx.fillStyle='#02040a';ctx.fillText(lbl,tx,2);}
+}
+const MORSE={'.-':'A','-...':'B','-.-.':'C','-..':'D','.':'E','..-.':'F','--.':'G','....':'H','..':'I','.---':'J','-.-':'K','.-..':'L','--':'M','-.':'N','---':'O','.--.':'P','--.-':'Q','.-.':'R','...':'S','-':'T','..-':'U','...-':'V','.--':'W','-..-':'X','-.--':'Y','--..':'Z','-----':'0','.----':'1','..---':'2','...--':'3','....-':'4','.....':'5','-....':'6','--...':'7','---..':'8','----.':'9','-...-':'=','.-.-.-':'.','--..--':',','-..-.':'/','.-.-.':'+'};
+function cwDecode(){
+  const dur=STATE.pcm.length/STATE.fs,win=Math.min(dur,120);
+  const seg=basebandSegment(0,win,16),fs2=seg.fs,n=seg.re.length;
+  const env=new Float32Array(n);for(let i=0;i<n;i++)env[i]=Math.hypot(seg.re[i],seg.im[i]);
+  const w=Math.max(1,Math.floor(fs2/60)),sm=new Float32Array(n);let acc=0;
+  for(let i=0;i<n;i++){acc+=env[i];if(i>=w)acc-=env[i-w];sm[i]=acc/Math.min(i+1,w);}
+  const so=[...sm].sort((a,b)=>a-b),p95=so[Math.floor(n*0.95)],p20=so[Math.floor(n*0.2)],thr=p20+0.4*(p95-p20);
+  const runs=[];let cur=sm[0]>thr,ln=1;for(let i=1;i<n;i++){const on=sm[i]>thr;if(on===cur)ln++;else{runs.push([cur,ln]);cur=on;ln=1;}}runs.push([cur,ln]);
+  const onLens=runs.filter(r=>r[0]).map(r=>r[1]);
+  if(onLens.length<4){log('  CW: portadora contínua (sem keying Morse detectado neste trecho).','c-amb');return;}
+  const sOn=[...onLens].sort((a,b)=>a-b),unit=sOn[Math.floor(sOn.length*0.3)]||1;
+  let code='',txt='';
+  for(const [on,ln] of runs){const u=ln/unit;
+    if(on)code+=u<2?'.':'-';
+    else if(u>=2){txt+=(MORSE[code]||(code?'#':''));code='';if(u>=5)txt+=' ';}}
+  txt+=(MORSE[code]||'');
+  const wpm=1.2/(unit/fs2);
+  log(`  CW/Morse (~${wpm.toFixed(0)} WPM): ${txt.trim()||'(sem decodificação clara)'}`, txt.trim()?'c-cyan':'c-amb');
 }
 function extractTrack(wf){
   const W=wf.bins,H=wf.rows, bin=new Float32Array(H),hz=new Float32Array(H),t=new Float32Array(H);
@@ -1070,7 +1122,7 @@ function ccsdsRand(n){let s=0xFF;const o=new Uint8Array(n);
   for(let i=0;i<n;i++){let b=0;for(let j=0;j<8;j++){b=(b<<1)|((s>>7)&1);const fb=((s)^(s>>2)^(s>>4)^(s>>7))&1;s=((s<<1)|fb)&0xFF;}o[i]=b;}return o;}
 function dbpskBits(){
   const dur=STATE.pcm.length/STATE.fs, decim=10, win=Math.min(dur,120);
-  const seg=basebandSegment(0,win,decim), fs2=seg.fs, sps=fs2/(STATE.baud||1200), n=seg.re.length;
+  const seg=basebandSegment(0,win,decim), fs2=seg.fs, sps=fs2/1200, n=seg.re.length; // 1200 bd de spec (não a estimativa)
   // best sampling phase by |I| energy after coarse derotation not needed for DBPSK (differential)
   let bestPh=0,bestE=-1,P=Math.max(1,Math.floor(sps));
   for(let p=0;p<P;p++){let e=0;for(let k=p;k<n;k+=sps){const i=Math.floor(k);e+=seg.re[i]*seg.re[i]+seg.im[i]*seg.im[i];}if(e>bestE){bestE=e;bestPh=p;}}
@@ -1081,7 +1133,7 @@ function dbpskBits(){
 }
 function demodCoherent(){ // Costas (BPSK) + Gardner timing -> bits coerentes (validado BER~0)
   const dur=STATE.pcm.length/STATE.fs,decim=10,win=Math.min(dur,120);
-  const seg=basebandSegment(0,win,decim),fs2=seg.fs,sps=fs2/(STATE.baud||1200),n=seg.re.length;
+  const seg=basebandSegment(0,win,decim),fs2=seg.fs,sps=fs2/1200,n=seg.re.length; // 1200 bd de spec
   const cr=new Float64Array(n);let ph=0,fr=0;const al=0.01,be=al*al/4;
   for(let i=0;i<n;i++){const c=Math.cos(ph),s=Math.sin(ph);const I=seg.re[i]*c+seg.im[i]*s,Q=-seg.re[i]*s+seg.im[i]*c;cr[i]=I;const e=(I>=0?1:-1)*Q;fr+=be*e;ph+=fr+al*e;}
   const Kp=0.03,Ki=Kp*Kp/4;const bits=[];let onPos=sps*2,prevOn=0,w=0;
@@ -1141,6 +1193,15 @@ function decodeFromBlock(block,deintName,order,basis){
 function runFEC(){
   if(!STATE.pcm)return;
   log('\u25b6 DECODE DO SEU .OGG \u2014 demod coerente (Costas+Gardner) + varredura de conven\u00e7\u00f5es (gate por RS)\u2026','c-vio');
+  const carr=STATE.carriers||[],nb=carr.filter(c=>c.kind==='BPSK').length;
+  log(`  Detec\u00e7\u00e3o: ${carr.length} portadora(s) \u2014 ${nb} BPSK, ${carr.length-nb} estreita(s)/CW.`,'c-dim');
+  if(carr.length&&nb===0){
+    log('  \u2192 Sinal \u00e9 CW/portadora estreita \u2014 a telemetria de tens\u00e3o/temperatura N\u00c3O est\u00e1 aqui (ela vem no BPSK). Rodando decoder CW/Morse\u2026','c-amb');
+    $('#ch1').innerHTML='<span class="c-amb">CW (sem BPSK)</span>';['#ch2','#ch3','#ch4','#ch5','#ch6','#ch7'].forEach(i=>$(i).innerHTML='<span class="c-dim">N/A (CW)</span>');
+    $('#decRes').innerHTML='<span class="c-amb">CW/portadora \u2014 Morse no console</span>';
+    cwDecode();return;
+  }
+  if(nb>0)log(`  \u2192 BPSK detectado (${nb} raia larga) \u2014 rodando cadeia FEC do FUNcube-1.`,'c-grn');
   const streams=[['coerente',demodCoherent()],['diferencial',dbpskBits()]];
   $('#ch1').innerHTML=`<span class="c-grn">OK \u00b7 ${streams[0][1].length.toLocaleString('pt-BR')} s\u00edmbolos (coerente) + diferencial</span>`;
   const pairs=Object.keys(DEINT);
@@ -1163,7 +1224,7 @@ function runFEC(){
   const hits=allSyncsStride(best.bits,SYNCMODE[best.pname],16);
   let nValid=0,rsErrs=0,first=null;
   for(const h of hits){const r=decodeFromBlock(extractBlock(best.bits,h),best.pname,win.order,win.basis);
-    if(r.ok){const o=parseFC1(r.bytes);if(o.ok){nValid++;rsErrs+=Math.max(0,r.rsA)+Math.max(0,r.rsB);o._t=h.pos/1200;addFrame(o,'FEC live');if(!first)first=o;}}}
+    if(r.ok){const o=parseFC1(r.bytes);if(o.ok){nValid++;rsErrs+=Math.max(0,r.rsA)+Math.max(0,r.rsB);o._t=h.pos/1200;addFrame(o,'FEC live');pushHex(`frame seq ${o.seq}`,r.bytes);if(!first)first=o;}}}
   $('#ch6').innerHTML=`<span class="c-grn">RS OK \u00b7 ${rsErrs}B corrig.</span>`;$('#ch7').innerHTML=`<span class="c-grn">${nValid} frame(s) \u2713</span>`;
   $('#decRes').innerHTML=`<span class="c-grn">\u2713 ${nValid} frame(s) decodificados do seu .ogg</span>`;
   if(first)renderTlm(first,'FEC ao vivo \u2713');
@@ -1292,7 +1353,17 @@ $('#btnExpSes')&&($('#btnExpSes').onclick=expSessionJSON);
 $('#btnExpWf')&&($('#btnExpWf').onclick=expWaterfallPNG);
 $('#btnDecodeOgg')&&($('#btnDecodeOgg').onclick=decodeFromOgg);
 $('#btnDecodeOgg2')&&($('#btnDecodeOgg2').onclick=decodeFromOgg);
-$('#btnParseHex').onclick=()=>{const b=hexToBytes($('#hexBox').value);if(b.length<56){log('Hex curto: '+b.length+' bytes.','c-amb');return;}const o=parseFC1(b);renderTlm(o,'hex ('+b.length+' B)');if(o.ok){o._t=0;addFrame(o,'hex');renderFrameLog();renderSeries();}};
+$('#btnParseHex').onclick=()=>{const b=hexToBytes($('#hexBox').value);if(b.length<56){log('Hex curto: '+b.length+' bytes.','c-amb');return;}const o=parseFC1(b);renderTlm(o,'hex ('+b.length+' B)');pushHex('hex colado',b);if(o.ok){o._t=0;addFrame(o,'hex');renderFrameLog();renderSeries();}};
+
+/* ===================== CONSOLE HEX ===================== */
+let LASTHEX='';
+function hexdump(bytes){let s='';for(let i=0;i<bytes.length;i+=16){let off=i.toString(16).padStart(4,'0')+': ';let row='';for(let j=0;j<16&&i+j<bytes.length;j++)row+=bytes[i+j].toString(16).padStart(2,'0')+' ';s+=off+row.trim()+'\n';}return s.trim();}
+function pushHex(label,bytes){const t=new Date().toISOString().substr(11,8);const dump=hexdump(bytes);LASTHEX=Array.from(bytes).map(b=>b.toString(16).padStart(2,'0')).join(' ');
+  const el=$('#hexcon');const prev=el.textContent==='\u2014'?'':el.textContent+'\n\n';
+  el.textContent=`# ${t} \u00b7 ${label} (${bytes.length} B)\n${dump}`+(prev?'\n\n'+prev:'');
+  $('#hexstat').textContent='1 frame';}
+function copyHex(){if(!LASTHEX){log('Nenhum hex para copiar.','c-amb');return;}navigator.clipboard&&navigator.clipboard.writeText(LASTHEX).then(()=>log('Hex copiado para a \u00e1rea de transfer\u00eancia.','c-grn'),()=>log('N\u00e3o consegui copiar (permiss\u00e3o).','c-amb'));}
+$('#btnCopyHex')&&($('#btnCopyHex').onclick=copyHex);
 
 /* boot */
 log('FUNcube-1 Commander iniciado.','c-grn');
